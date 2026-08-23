@@ -87,6 +87,132 @@ Extend the system to multiple accounts and different risk rules.
 
 AI-assisted development was used as part of the implementation process. My role focused on system design, decomposition of requirements, defining execution logic, testing, debugging and validating behavior against real trading conditions.
 
+## Signal flow
+
+A trading signal moves through several independent layers:
+
+```text
+TradingView / Pine Script
+        │
+        │ webhook JSON
+        ▼
+Flask API
+        │
+        ▼
+Signal Validation
+        │
+        ▼
+Signal Router
+        │
+        ├── account-specific risk configuration
+        ├── account allocation
+        └── enabled / disabled account state
+        │
+        ▼
+Execution Service
+        │
+        ├── position sizing
+        ├── execution request
+        └── broker-side order management
+        │
+        ▼
+MetaTrader 5
+```
+
+Separating these responsibilities makes it possible to test signal processing, routing and execution logic independently.
+
+## Webhook API
+
+TradingView communicates with the execution system through a Flask webhook endpoint.
+
+### Endpoint
+
+```text
+POST /webhook
+```
+
+Example payload:
+
+```json
+{
+  "symbol": "EURUSD",
+  "side": "buy",
+  "stop_distance": 25.0,
+  "target_distance": 50.0
+}
+```
+
+Before a signal reaches the routing and execution layers, the incoming payload is validated and normalized.
+
+The validation layer checks:
+
+- required fields
+- supported trade direction
+- symbol formatting
+- numeric stop distance
+- numeric target distance
+- positive stop and target values
+
+Invalid signals are rejected before they can reach the execution layer.
+
+The repository also includes a health endpoint:
+
+```text
+GET /health
+```
+
+This can be used to verify that the Flask service is running.
+
+## Testing and CI
+
+The portfolio version includes automated tests for the main application layers.
+
+Tests cover areas such as:
+
+- execution-service behavior
+- webhook request handling
+- signal validation
+- invalid payload rejection
+- signal normalization
+- integration between the Flask endpoint and execution flow
+
+Tests can be run locally with:
+
+```bash
+pytest
+```
+
+The repository also uses GitHub Actions for continuous integration.
+
+On every push to the repository, the test workflow automatically installs the required dependencies and runs the test suite.
+
+This provides an automated check that changes do not break previously tested behavior.
+
+## Repository structure
+
+```text
+trading-automation-system/
+│
+├── src/
+│   ├── app.py
+│   ├── execution.py
+│   ├── router.py
+│   └── validation.py
+│
+├── tests/
+│   └── automated test modules
+│
+├── .github/
+│   └── workflows/
+│       └── automated test workflow
+│
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
+
+The public repository contains a simplified portfolio implementation of the architecture. Production credentials, broker configuration, proprietary strategy rules and sensitive account-specific logic are not included.
+
 ## Tech Stack
 - Python
 - Flask
@@ -103,4 +229,3 @@ AI-assisted development was used as part of the implementation process. My role 
 
 The system has progressed from a single-account prototype to an automated multi-account execution architecture and has been tested in live trading environments.
 
-This repository is a portfolio version of the project. Proprietary trading rules, credentials, account information and sensitive execution logic are intentionally excluded.
