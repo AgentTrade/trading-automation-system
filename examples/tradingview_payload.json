@@ -1,0 +1,6 @@
+{
+  "symbol": "EURUSD",
+  "side": "buy",
+  "stop_distance": 25.0,
+  "target_distance": 50.0
+}
