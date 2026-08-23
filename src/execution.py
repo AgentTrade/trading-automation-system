@@ -1,170 +1,111 @@
 """
-Flask webhook entry point for the trading automation system.
+Broker-side execution layer for the trading automation system.
 
-Portfolio flow:
-
-TradingView -> Webhook -> Validation -> Routing -> Execution
+Portfolio version:
+- no credentials
+- no broker account data
+- no proprietary trading rules
 """
 
-from flask import Flask, jsonify, request
-
-from config import ACCOUNTS
-from logging_config import configure_logging, get_logger
-from router import AccountConfig, SignalRouter, TradingSignal
-from validation import ValidationError, validate_signal_payload
+from dataclasses import dataclass
+from typing import Optional
 
 
-configure_logging()
-logger = get_logger(__name__)
-
-app = Flask(__name__)
-
-
-router_accounts = {
-    account.name: AccountConfig(
-        name=account.name,
-        risk_percent=account.risk_percent,
-        enabled=account.enabled,
-    )
-    for account in ACCOUNTS
-}
+@dataclass
+class ExecutionRequest:
+    symbol: str
+    side: str
+    risk_percent: float
+    stop_distance: float
+    target_distance: float
 
 
-router = SignalRouter(router_accounts)
+@dataclass
+class ExecutionResult:
+    success: bool
+    account: str
+    symbol: str
+    side: str
+    volume: float
+    message: str
 
 
-execution_services = {
-    account.name: ExecutionService(
-        account_name=account.name,
-        equity=account.equity,
-    )
-    for account in ACCOUNTS
-}
+class ExecutionService:
+    """
+    Converts a validated trading signal into a broker-side execution request.
 
+    The production implementation connects this layer to MetaTrader 5.
+    This portfolio version demonstrates the execution and risk-management
+    architecture without exposing broker credentials or proprietary logic.
+    """
 
-@app.get("/health")
-def health():
-    return jsonify(
-        {
-            "status": "ok",
-            "service": "trading-automation-system",
+    def __init__(self, account_name: str, equity: float):
+        self.account_name = account_name
+        self.equity = equity
+
+    def calculate_position_size(
+        self,
+        risk_percent: float,
+        stop_distance: float,
+        value_per_point: float = 1.0,
+    ) -> float:
+        if risk_percent <= 0:
+            raise ValueError("risk_percent must be greater than zero")
+
+        if stop_distance <= 0:
+            raise ValueError("stop_distance must be greater than zero")
+
+        risk_amount = self.equity * (risk_percent / 100)
+
+        volume = risk_amount / (
+            stop_distance * value_per_point
+        )
+
+        return round(volume, 2)
+
+    def execute(
+        self,
+        request: ExecutionRequest,
+    ) -> ExecutionResult:
+        side = request.side.upper()
+
+        if side not in {"BUY", "SELL"}:
+            raise ValueError("side must be BUY or SELL")
+
+        volume = self.calculate_position_size(
+            risk_percent=request.risk_percent,
+            stop_distance=request.stop_distance,
+        )
+
+        return ExecutionResult(
+            success=True,
+            account=self.account_name,
+            symbol=request.symbol,
+            side=side,
+            volume=volume,
+            message=(
+                "Portfolio simulation: execution request validated."
+            ),
+        )
+
+    def close_position(
+        self,
+        symbol: str,
+        reason: Optional[str] = None,
+    ) -> dict:
+        return {
+            "account": self.account_name,
+            "symbol": symbol,
+            "action": "CLOSE",
+            "reason": reason or "exit condition reached",
         }
-    )
 
-
-@app.post("/webhook")
-def webhook():
-    payload = request.get_json(silent=True)
-
-    logger.info("WEBHOOK_RECEIVED")
-
-    if payload is None:
-        logger.warning("SIGNAL_REJECTED invalid_json")
-        return jsonify({"error": "Invalid JSON payload"}), 400
-
-    try:
-        validated = validate_signal_payload(payload)
-
-        logger.info(
-            "SIGNAL_VALIDATED symbol=%s side=%s",
-            validated["symbol"],
-            validated["side"],
-        )
-
-        signal = TradingSignal(
-            symbol=validated["symbol"],
-            side=validated["side"].upper(),
-            stop_distance=validated["stop_distance"],
-            target_distance=validated["target_distance"],
-        )
-
-        routes = router.route(signal)
-
-        logger.info(
-            "SIGNAL_ROUTED symbol=%s targets=%s",
-            signal.symbol,
-            len(routes),
-        )
-
-        results = []
-
-        for route in routes:
-            account_name = route["account"]
-            service = execution_services[account_name]
-
-            execution_request = ExecutionRequest(
-                symbol=signal.symbol,
-                side=signal.side,
-                risk_percent=route["risk_percent"],
-                stop_distance=signal.stop_distance,
-                target_distance=signal.target_distance,
-            )
-
-            try:
-                result = service.execute(execution_request)
-
-                logger.info(
-                    "EXECUTION_SUCCESS account=%s symbol=%s side=%s",
-                    result.account,
-                    result.symbol,
-                    result.side,
-                )
-
-                results.append(
-                    {
-                        "account": result.account,
-                        "symbol": result.symbol,
-                        "side": result.side,
-                        "volume": result.volume,
-                        "success": result.success,
-                        "message": result.message,
-                    }
-                )
-
-            except (ValueError, RuntimeError) as error:
-                logger.exception(
-                    "EXECUTION_FAILED account=%s symbol=%s",
-                    account_name,
-                    signal.symbol,
-                )
-
-                results.append(
-                    {
-                        "account": account_name,
-                        "symbol": signal.symbol,
-                        "side": signal.side,
-                        "success": False,
-                        "message": str(error),
-                    }
-                )
-
-        successful = sum(
-            1 for item in results if item["success"]
-        )
-
-        failed = len(results) - successful
-
-        return jsonify(
-            {
-                "status": "processed",
-                "successful_executions": successful,
-                "failed_executions": failed,
-                "executions": results,
-            }
-        )
-
-    except (ValidationError, ValueError, TypeError) as error:
-        logger.warning(
-            "SIGNAL_REJECTED reason=%s",
-            error,
-        )
-
-        return jsonify({"error": str(error)}), 400
-
-
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-        debug=False,
-    )
+    def move_to_break_even(
+        self,
+        symbol: str,
+    ) -> dict:
+        return {
+            "account": self.account_name,
+            "symbol": symbol,
+            "action": "MOVE_TO_BREAK_EVEN",
+        }
