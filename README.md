@@ -1,5 +1,5 @@
 # Trading Automation System
-
+[![Tests](https://github.com/AgentTrade/trading-automation-system/actions/workflows/tests.yml/badge.svg)](https://github.com/AgentTrade/trading-automation-system/actions/workflows/tests.yml)
 An end-to-end trading automation project built to turn rule-based TradingView signals into automatically managed MetaTrader 5 trades.
 
 The project started with a simple goal: remove manual execution and reduce the human factor from a rule-based trading process.
@@ -23,24 +23,24 @@ The system can:
 
 ## Architecture
 
-```text
-TradingView / Pine Script
-          │
-          │ Webhook
-          ▼
-   Python / Flask Router
-          │
-          ├──► Account / Execution Service
-          │        └──► MetaTrader 5
-          │
-          ├──► Account / Execution Service
-          │        └──► MetaTrader 5
-          │
-          └──► Additional accounts
+```mermaid
+flowchart TD
+    A[TradingView / Pine Script] -->|Webhook JSON| B[Flask API]
+    B --> C[Signal Validation]
+    C --> D[Signal Router]
+
+    D --> E1[Account A]
+    D --> E2[Account B]
+    D --> E3[Additional Accounts]
+
+    E1 --> F1[Risk & Execution Service]
+    E2 --> F2[Risk & Execution Service]
+    E3 --> F3[Risk & Execution Service]
+
+    F1 --> G1[MetaTrader 5]
+    F2 --> G2[MetaTrader 5]
+    F3 --> G3[MetaTrader 5]
 ```
-
-The routing layer separates signal generation from execution and allows different accounts to use different risk and allocation rules.
-
 ## Problems solved during development
 
 ### Broker price differences
