@@ -9,7 +9,6 @@ TradingView -> Webhook -> Validation -> Routing -> Execution
 from flask import Flask, jsonify, request
 
 from config import ACCOUNTS
-from execution import ExecutionRequest, ExecutionService
 from logging_config import configure_logging, get_logger
 from router import AccountConfig, SignalRouter, TradingSignal
 from validation import ValidationError, validate_signal_payload
