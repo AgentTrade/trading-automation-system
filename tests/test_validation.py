@@ -23,7 +23,7 @@ class TestSignalValidation(unittest.TestCase):
         result = validate_signal_payload(payload)
 
         self.assertEqual(result["symbol"], "EURUSD")
-        self.assertEqual(result["side"], "BUY")
+        self.assertEqual(result["side"], "buy")
         self.assertEqual(result["stop_distance"], 25.0)
         self.assertEqual(result["target_distance"], 50.0)
 
@@ -37,7 +37,7 @@ class TestSignalValidation(unittest.TestCase):
 
         result = validate_signal_payload(payload)
 
-        self.assertEqual(result["side"], "SELL")
+        self.assertEqual(result["side"], "sell")
 
     def test_invalid_side(self):
         payload = {
