@@ -8,6 +8,7 @@ TradingView -> Webhook -> Validation -> Routing -> Execution
 
 from flask import Flask, jsonify, request
 
+from config import ACCOUNTS
 from execution import ExecutionRequest, ExecutionService
 from router import AccountConfig, SignalRouter, TradingSignal
 from validation import ValidationError, validate_signal_payload
@@ -16,32 +17,25 @@ from validation import ValidationError, validate_signal_payload
 app = Flask(__name__)
 
 
-ACCOUNTS = {
-    "account_primary": AccountConfig(
-        name="account_primary",
-        risk_percent=0.5,
-        enabled=True,
-    ),
-    "account_secondary": AccountConfig(
-        name="account_secondary",
-        risk_percent=0.25,
-        enabled=True,
-    ),
+router_accounts = {
+    account.name: AccountConfig(
+        name=account.name,
+        risk_percent=account.risk_percent,
+        enabled=account.enabled,
+    )
+    for account in ACCOUNTS
 }
 
 
-router = SignalRouter(ACCOUNTS)
+router = SignalRouter(router_accounts)
 
 
 execution_services = {
-    "account_primary": ExecutionService(
-        account_name="account_primary",
-        equity=10_000,
-    ),
-    "account_secondary": ExecutionService(
-        account_name="account_secondary",
-        equity=25_000,
-    ),
+    account.name: ExecutionService(
+        account_name=account.name,
+        equity=account.equity,
+    )
+    for account in ACCOUNTS
 }
 
 
