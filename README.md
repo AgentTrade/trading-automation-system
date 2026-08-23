@@ -1,25 +1,16 @@
 # Trading Automation System
+
 [![Tests](https://github.com/AgentTrade/trading-automation-system/actions/workflows/tests.yml/badge.svg)](https://github.com/AgentTrade/trading-automation-system/actions/workflows/tests.yml)
-An end-to-end trading automation project built to turn rule-based TradingView signals into automatically managed MetaTrader 5 trades.
 
-The project started with a simple goal: remove manual execution and reduce the human factor from a rule-based trading process.
+A portfolio-safe implementation of an event-driven trading execution architecture that turns rule-based TradingView signals into validated, routed and risk-sized execution requests for MetaTrader 5 environments.
 
-It evolved from a single TradingView → MT5 connection into a multi-account execution and risk-management system.
+> **Portfolio scope:** this repository demonstrates the software architecture. Production credentials, broker identifiers, proprietary strategy rules and sensitive account-allocation logic are intentionally excluded.
 
-## What the system does
+## Why I built it
 
-The system can:
+The original goal was straightforward: remove manual execution and reduce the human factor from a deterministic trading process. The project evolved from a single TradingView-to-MT5 connection into a multi-account architecture with validation, account-specific risk, execution isolation, logging and automated tests.
 
-- detect rule-based trade setups in TradingView
-- generate and send webhook signals
-- route signals through a Python/Flask execution layer
-- execute trades automatically in MetaTrader 5
-- calculate position size based on account-specific risk
-- manage multiple trading accounts
-- close positions automatically when exit conditions are reached
-- move positions to break-even when predefined conditions are met
-- log and track trade activity
-- recover the execution environment after server or terminal restarts
+The production system has been exercised in live trading environments. This public repository is a simplified implementation designed to make the engineering decisions reviewable without publishing proprietary trading logic.
 
 ## Architecture
 
@@ -28,110 +19,52 @@ flowchart TD
     A[TradingView / Pine Script] -->|Webhook JSON| B[Flask API]
     B --> C[Signal Validation]
     C --> D[Signal Router]
-
     D --> E1[Account A]
     D --> E2[Account B]
     D --> E3[Additional Accounts]
-
     E1 --> F1[Risk & Execution Service]
     E2 --> F2[Risk & Execution Service]
     E3 --> F3[Risk & Execution Service]
-
     F1 --> G1[MetaTrader 5]
     F2 --> G2[MetaTrader 5]
     F3 --> G3[MetaTrader 5]
 ```
-## Problems solved during development
 
-### Broker price differences
+The layers are deliberately separated so webhook handling, validation, routing and execution behavior can be tested independently.
 
-TradingView and MT5 brokers do not always produce identical prices.
+## Core capabilities
 
-Using fixed price distances from the TradingView feed therefore created execution inconsistencies.
+- TradingView webhook ingestion through Flask
+- payload validation and normalization before execution
+- centralized account configuration
+- multi-account signal routing with enabled/disabled account state
+- account-specific percentage risk and position sizing
+- broker-side execution abstraction for MetaTrader 5 integration
+- exit and break-even command abstractions
+- per-account fault isolation: one execution failure does not prevent other routed accounts from being processed
+- structured lifecycle logging for received, validated, routed, successful, failed and rejected signals
+- health endpoint for service checks
+- automated unit/integration tests and GitHub Actions CI
 
-I changed the execution logic so protective levels can be calculated using the broker's live price rather than assuming both feeds are identical.
+## API
 
-### TradingView state vs. broker state
+### `GET /health`
 
-A trade could appear stopped on TradingView while remaining open at the broker because of differences between price feeds.
+Returns service status and the number of configured execution accounts.
 
-This created a state-management problem: the execution system could no longer assume that TradingView's displayed trade state was identical to the real broker position state.
+Example response:
 
-The exit logic was redesigned so execution decisions could account for the actual broker-side position.
-
-### Multi-account risk management
-
-Different accounts required different risk rules.
-
-Instead of duplicating the entire system for every account, I introduced a routing layer that can distribute signals according to account-specific allocation and risk logic.
-
-### Operational recovery
-
-A restart of the server or trading terminals should not require rebuilding the environment manually.
-
-I therefore added a recovery workflow for restarting the required services and terminals and checking that the execution environment is running again.
-
-## Development approach
-
-I built the project iteratively:
-
-Break the trading rules into smaller deterministic components.
-Implement individual setup logic.
-Connect TradingView alerts to Python.
-Connect Python execution to MT5.
-Test execution on small live accounts.
-Compare TradingView signals with broker-side execution.
-Inspect logs and investigate mismatches.
-Modify the architecture as real execution problems appeared.
-Extend the system to multiple accounts and different risk rules.
-
-AI-assisted development was used as part of the implementation process. My role focused on system design, decomposition of requirements, defining execution logic, testing, debugging and validating behavior against real trading conditions.
-
-## Signal flow
-
-A trading signal moves through several independent layers:
-
-```text
-TradingView / Pine Script
-        │
-        │ webhook JSON
-        ▼
-Flask API
-        │
-        ▼
-Signal Validation
-        │
-        ▼
-Signal Router
-        │
-        ├── account-specific risk configuration
-        ├── account allocation
-        └── enabled / disabled account state
-        │
-        ▼
-Execution Service
-        │
-        ├── position sizing
-        ├── execution request
-        └── broker-side order management
-        │
-        ▼
-MetaTrader 5
+```json
+{
+  "status": "ok",
+  "service": "trading-automation-system",
+  "configured_accounts": 2
+}
 ```
 
-Separating these responsibilities makes it possible to test signal processing, routing and execution logic independently.
+### `POST /webhook`
 
-## Webhook API
-
-TradingView communicates with the execution system through a Flask webhook endpoint.
-
-### Endpoint
-
-```text
-POST /webhook
-```
-
-Example payload:
+Example TradingView payload:
 
 ```json
 {
@@ -142,90 +75,137 @@ Example payload:
 }
 ```
 
-Before a signal reaches the routing and execution layers, the incoming payload is validated and normalized.
+The validation layer rejects malformed or unsupported requests before they reach routing or execution. It checks required fields, trade direction, symbol formatting, numeric distances and positive stop/target values.
 
-The validation layer checks:
+Example successful response shape:
 
-- required fields
-- supported trade direction
-- symbol formatting
-- numeric stop distance
-- numeric target distance
-- positive stop and target values
-
-Invalid signals are rejected before they can reach the execution layer.
-
-The repository also includes a health endpoint:
-
-```text
-GET /health
+```json
+{
+  "status": "processed",
+  "successful_executions": 2,
+  "failed_executions": 0,
+  "executions": [
+    {
+      "account": "account_primary",
+      "symbol": "EURUSD",
+      "side": "BUY",
+      "volume": 2.0,
+      "success": true,
+      "message": "Portfolio simulation: execution request validated."
+    }
+  ]
+}
 ```
 
-This can be used to verify that the Flask service is running.
+## Reliability design
 
-## Testing and CI
+### Broker price differences
 
-The portfolio version includes automated tests for the main application layers.
+TradingView and MT5 brokers do not necessarily expose identical prices. In the production design, protective levels are therefore derived from broker-side live pricing rather than assuming the chart feed and execution feed are identical.
 
-Tests cover areas such as:
+### TradingView state vs. broker state
 
-- execution-service behavior
-- webhook request handling
-- signal validation
-- invalid payload rejection
-- signal normalization
-- integration between the Flask endpoint and execution flow
+A chart-side trade state cannot be treated as authoritative for a broker position. The production exit design therefore verifies and manages the actual broker-side position instead of relying only on TradingView's displayed state.
 
-Tests can be run locally with:
+### Partial execution failure
 
-```bash
-pytest
-```
+A multi-account system should not turn one account-specific failure into a portfolio-wide failure. The webhook layer isolates execution exceptions per routed account, records the failed result and continues processing the remaining accounts.
 
-The repository also uses GitHub Actions for continuous integration.
+### Operational recovery
 
-On every push to the repository, the test workflow automatically installs the required dependencies and runs the test suite.
-
-This provides an automated check that changes do not break previously tested behavior.
+The production workflow was designed so server or terminal restarts do not require rebuilding the execution environment manually. Recovery procedures restart required services and verify the environment before normal operation resumes.
 
 ## Repository structure
 
 ```text
 trading-automation-system/
-│
-├── src/
-│   ├── app.py
-│   ├── execution.py
-│   ├── router.py
-│   └── validation.py
-│
-├── tests/
-│   └── automated test modules
-│
 ├── .github/
 │   └── workflows/
-│       └── automated test workflow
-│
-├── requirements.txt
+│       └── tests.yml
+├── examples/
+│   └── tradingview_payload.json
+├── src/
+│   ├── app.py
+│   ├── config.py
+│   ├── execution.py
+│   ├── logging_config.py
+│   ├── router.py
+│   └── validation.py
+├── tests/
+│   ├── test_execution.py
+│   ├── test_router.py
+│   ├── test_validation.py
+│   └── test_webhook.py
 ├── .gitignore
+├── requirements.txt
 └── README.md
 ```
 
-The public repository contains a simplified portfolio implementation of the architecture. Production credentials, broker configuration, proprietary strategy rules and sensitive account-specific logic are not included.
+## Run locally
 
-## Tech Stack
-- Python
-- Flask
-- Pine Script
-- TradingView
-- MetaTrader 5
-- Webhooks
-- REST-style communication
-- Rule-based automation
-- Risk management
-- Multi-account execution
+Requirements: Python 3.12+.
+
+```bash
+git clone https://github.com/AgentTrade/trading-automation-system.git
+cd trading-automation-system
+python -m venv .venv
+```
+
+Activate the virtual environment, then install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the Flask service:
+
+```bash
+python src/app.py
+```
+
+Test the health endpoint:
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Send the included example signal:
+
+```bash
+curl -X POST http://127.0.0.1:5000/webhook \
+  -H "Content-Type: application/json" \
+  --data @examples/tradingview_payload.json
+```
+
+## Testing and CI
+
+Run the test suite locally with:
+
+```bash
+pytest -v
+```
+
+The tests cover validation, routing, position sizing, execution requests, webhook behavior, invalid requests, health checks and partial execution failure. GitHub Actions runs the suite automatically on pushes and pull requests to `main`.
+
+## Development approach
+
+The system was built iteratively around real execution problems:
+
+1. decompose trading rules into deterministic components
+2. connect TradingView alerts to Python webhook processing
+3. connect the execution layer to MT5 environments
+4. test on small live accounts and compare chart-side signals with broker-side behavior
+5. inspect logs and investigate mismatches
+6. redesign state and exit handling where real price-feed differences exposed assumptions
+7. extend the architecture to multiple accounts and account-specific risk
+8. add validation, configuration separation, automated tests, CI, logging and fault isolation
+
+AI-assisted development has been part of the implementation workflow. My role has focused on system design, requirement decomposition, execution logic, testing, debugging and validation against real trading conditions.
+
+## Tech stack
+
+**Python 3.12 · Flask · REST-style webhooks · Pine Script · TradingView · MetaTrader 5 · pytest · GitHub Actions**
 
 ## Project status
 
-The system has progressed from a single-account prototype to an automated multi-account execution architecture and has been tested in live trading environments.
-
+The architecture has progressed from a single-account prototype to a multi-account automation system. The public code is intentionally a portfolio implementation rather than a deployable copy of the proprietary production strategy.
