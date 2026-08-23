@@ -1,32 +1,33 @@
 """
 Flask webhook entry point for the trading automation system.
 
-Portfolio version demonstrating the flow:
+Portfolio flow:
 
 TradingView -> Webhook -> Validation -> Routing -> Execution
 """
 
 from flask import Flask, jsonify, request
 
-from router import AccountConfig, SignalRouter, TradingSignal
 from execution import ExecutionRequest, ExecutionService
+from router import AccountConfig, SignalRouter, TradingSignal
+from validation import ValidationError, validate_signal_payload
 
 
 app = Flask(__name__)
 
 
-ACCOUNTS = [
-    AccountConfig(
+ACCOUNTS = {
+    "account_primary": AccountConfig(
         name="account_primary",
         risk_percent=0.5,
         enabled=True,
     ),
-    AccountConfig(
+    "account_secondary": AccountConfig(
         name="account_secondary",
         risk_percent=0.25,
         enabled=True,
     ),
-]
+}
 
 
 router = SignalRouter(ACCOUNTS)
@@ -58,32 +59,17 @@ def health():
 def webhook():
     payload = request.get_json(silent=True)
 
-    if not payload:
+    if payload is None:
         return jsonify({"error": "Invalid JSON payload"}), 400
 
-    required_fields = {
-        "symbol",
-        "side",
-        "stop_distance",
-        "target_distance",
-    }
-
-    missing = required_fields - payload.keys()
-
-    if missing:
-        return jsonify(
-            {
-                "error": "Missing required fields",
-                "fields": sorted(missing),
-            }
-        ), 400
-
     try:
+        validated = validate_signal_payload(payload)
+
         signal = TradingSignal(
-            symbol=str(payload["symbol"]),
-            side=str(payload["side"]).upper(),
-            stop_distance=float(payload["stop_distance"]),
-            target_distance=float(payload["target_distance"]),
+            symbol=validated["symbol"],
+            side=validated["side"].upper(),
+            stop_distance=validated["stop_distance"],
+            target_distance=validated["target_distance"],
         )
 
         routes = router.route(signal)
@@ -121,7 +107,7 @@ def webhook():
             }
         )
 
-    except (ValueError, TypeError) as error:
+    except (ValidationError, ValueError, TypeError) as error:
         return jsonify({"error": str(error)}), 400
 
 
